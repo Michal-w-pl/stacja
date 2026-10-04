@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Stacja pogody i kalendarza dla Kindle Paperwhite 4 (1072x1448).
+Stacja pogody i kalendarza dla Kindle 10. generacji (600x800).
 Pobiera pogodę z Open-Meteo i wydarzenia z kalendarzy iCal,
 a potem rysuje obrazek PNG w skali szarości.
 
@@ -26,7 +26,7 @@ MIASTO = "Radomsko"
 LAT, LON = 51.0670, 19.4450
 STREFA = ZoneInfo("Europe/Warsaw")
 DNI_KALENDARZA = 14          # ile dni do przodu pokazywać wydarzenia
-W, H = 1072, 1448            # rozdzielczość Kindle Paperwhite 4
+W, H = 600, 800              # rozdzielczość ekranu Kindle 10. gen (J9G29R)
 M = 48                       # margines
 # ----------------------------------------------------------------
 
@@ -296,33 +296,32 @@ def day_label(day, today):
 
 
 def render(weather, events, cal_errors, cal_configured, now, out):
-    img = Image.new("L", (W, H), BIALY)
+    """Rysuje na wirtualnym płótnie VW x VH, potem skaluje do rozdzielczości ekranu."""
+    VW, VH, m = 900, 1200, 36
+    img = Image.new("L", (VW, VH), BIALY)
     d = ImageDraw.Draw(img)
     today = now.date()
 
     # ---- NAGŁÓWEK ----
-    y = 40
-    d.text((M, y), DNI[today.weekday()], font=F(44), fill=CIEMNY)
-    d.text((M, y + 52), f"{today.day} {MIESIACE[today.month - 1]}", font=F(84, True), fill=CZARNY)
-    right = W - M
-    d.text((right, y + 8), MIASTO, font=F(34, True), fill=CZARNY, anchor="ra")
-    d.text((right, y + 52), f"aktualizacja {now:%H:%M}", font=F(26), fill=SZARY, anchor="ra")
-    y = 185
-    d.line([M, y, W - M, y], fill=CZARNY, width=3)
+    d.text((m, 26), DNI[today.weekday()], font=F(36), fill=CIEMNY)
+    d.text((m, 66), f"{today.day} {MIESIACE[today.month - 1]}", font=F(66, True), fill=CZARNY)
+    d.text((VW - m, 34), MIASTO, font=F(30, True), fill=CZARNY, anchor="ra")
+    d.text((VW - m, 74), f"akt. {now:%H:%M}", font=F(24), fill=SZARY, anchor="ra")
+    d.line([m, 158, VW - m, 158], fill=CZARNY, width=3)
 
-    # ---- POGODA TERAZ ----
-    y = 205
     if weather:
+        # ---- TERAZ ----
+        y = 172
         c = weather["current"]
         opis, kind = wmo_info(c["weather_code"])
-        draw_icon(d, kind, M + 115, y + 120, 220, night=not c.get("is_day", 1))
+        draw_icon(d, kind, m + 85, y + 92, 175, night=not c.get("is_day", 1))
         temp = f"{round(c['temperature_2m'])}°"
-        big = F(170, True)
-        d.text((M + 250, y - 15), temp, font=big, fill=CZARNY)
-        tx = M + 260 + text_w(d, temp, big) + 25
-        tw = W - M - tx
-        f_op = F(34, True) if text_w(d, opis, F(34, True)) <= tw else F(28, True)
-        d.text((tx, y + 25), fit(d, opis, f_op, tw), font=f_op, fill=CZARNY)
+        big = F(140, True)
+        d.text((m + 190, y - 8), temp, font=big, fill=CZARNY)
+        tx = m + 200 + text_w(d, temp, big) + 22
+        tw = VW - m - tx
+        f_op = F(30, True) if text_w(d, opis, F(30, True)) <= tw else F(25, True)
+        d.text((tx, y + 14), fit(d, opis, f_op, tw), font=f_op, fill=CZARNY)
         dl = weather["daily"]
         sr, ss = dl["sunrise"][0][-5:], dl["sunset"][0][-5:]
         lines = [f"odczuwalna {round(c['apparent_temperature'])}°",
@@ -330,120 +329,114 @@ def render(weather, events, cal_errors, cal_configured, now, out):
                  f"wilgotność {round(c['relative_humidity_2m'])}%",
                  f"☀ {sr} – {ss}"]
         for n, ln in enumerate(lines):
-            d.text((tx, y + 75 + n * 40), fit(d, ln, F(28), tw), font=F(28),
+            d.text((tx, y + 58 + n * 34), fit(d, ln, F(25), tw), font=F(25),
                    fill=CIEMNY if n < 3 else SZARY)
 
         # ---- GODZINY ----
-        y = 470
-        d.rounded_rectangle([M, y, W - M, y + 200], radius=24, fill=245, outline=JASNY, width=2)
+        y = 382
+        d.rounded_rectangle([m, y, VW - m, y + 172], radius=20, fill=245, outline=JASNY, width=2)
         h = weather["hourly"]
         times = [datetime.fromisoformat(t).replace(tzinfo=STREFA) for t in h["time"]]
         start_i = next((i for i, t in enumerate(times) if t >= now - timedelta(minutes=30)), 0)
-        idx = [start_i + 2 * k for k in range(1, 7) if start_i + 2 * k < len(times)]
-        col = (W - 2 * M) / max(1, len(idx))
+        idx = [start_i + 2 * k for k in range(1, 6) if start_i + 2 * k < len(times)]
+        col = (VW - 2 * m) / max(1, len(idx))
+        isday = h.get("is_day", [1] * len(times))
         for k, i in enumerate(idx):
-            cx = M + col * k + col / 2
-            d.text((cx, y + 18), times[i].strftime("%H:%M"), font=F(26), fill=CIEMNY, anchor="ma")
+            cx = m + col * k + col / 2
+            d.text((cx, y + 12), times[i].strftime("%H:%M"), font=F(24), fill=CIEMNY, anchor="ma")
             _, kk = wmo_info(h["weather_code"][i])
-            draw_icon(d, kk, cx, y + 90, 64, night=not h.get("is_day", [1] * len(times))[i])
-            d.text((cx, y + 128), f"{round(h['temperature_2m'][i])}°", font=F(32, True), fill=CZARNY, anchor="ma")
+            draw_icon(d, kk, cx, y + 76, 58, night=not isday[i])
+            d.text((cx, y + 106), f"{round(h['temperature_2m'][i])}°", font=F(30, True), fill=CZARNY, anchor="ma")
             p = h["precipitation_probability"][i]
             if p is not None and p >= 20:
-                d.text((cx, y + 168), f"☂ {p}%", font=F(22), fill=SZARY, anchor="ma")
+                d.text((cx, y + 142), f"☂ {p}%", font=F(21), fill=SZARY, anchor="ma")
 
         # ---- KOLEJNE DNI ----
-        y = 690
+        y = 572
         days_n = 5
-        col = (W - 2 * M) / days_n
+        col = (VW - 2 * m) / days_n
         for k in range(1, days_n + 1):
             if k >= len(dl["time"]):
                 break
             dd = date.fromisoformat(dl["time"][k])
-            cx = M + col * (k - 1) + col / 2
-            d.text((cx, y), DNI_KR[dd.weekday()], font=F(30, True), fill=CZARNY, anchor="ma")
+            cx = m + col * (k - 1) + col / 2
+            d.text((cx, y), DNI_KR[dd.weekday()], font=F(27, True), fill=CZARNY, anchor="ma")
             _, kk = wmo_info(dl["weather_code"][k])
-            draw_icon(d, kk, cx, y + 78, 72)
-            tmax, tmin = round(dl["temperature_2m_max"][k]), round(dl["temperature_2m_min"][k])
-            d.text((cx, y + 125), f"{tmax}°", font=F(30, True), fill=CZARNY, anchor="ma")
-            d.text((cx, y + 160), f"{tmin}°", font=F(28), fill=SZARY, anchor="ma")
+            draw_icon(d, kk, cx, y + 68, 62)
+            d.text((cx, y + 106), f"{round(dl['temperature_2m_max'][k])}°", font=F(28, True), fill=CZARNY, anchor="ma")
+            d.text((cx, y + 140), f"{round(dl['temperature_2m_min'][k])}°", font=F(25), fill=SZARY, anchor="ma")
     else:
-        d.text((W / 2, 450), "Brak danych pogodowych", font=F(40), fill=SZARY, anchor="mm")
+        d.text((VW / 2, 450), "Brak danych pogodowych", font=F(36), fill=SZARY, anchor="mm")
 
-    y = 900
-    d.line([M, y, W - M, y], fill=CZARNY, width=3)
+    d.line([m, 748, VW - m, 748], fill=CZARNY, width=3)
 
     # ---- MINI MIESIĄC ----
-    y0 = 925
-    gx, cell = M, 58
-    grid_w = cell * 7
-    d.text((gx, y0), f"{MIESIACE_M[today.month - 1]} {today.year}", font=F(32, True), fill=CZARNY)
+    y0 = 766
+    cell = 48
+    d.text((m, y0), f"{MIESIACE_M[today.month - 1]}", font=F(28, True), fill=CZARNY)
     for i, nm in enumerate(DNI_MINI):
-        d.text((gx + cell * i + cell / 2, y0 + 58), nm, font=F(22, True),
+        d.text((m + cell * i + cell / 2, y0 + 46), nm, font=F(19, True),
                fill=SZARY if i < 5 else CZARNY, anchor="ma")
     busy = {e["day"] for e in events}
     weeks = pycal.Calendar(firstweekday=0).monthdatescalendar(today.year, today.month)
     for r_i, week in enumerate(weeks):
         for c_i, dd in enumerate(week):
-            cx = gx + cell * c_i + cell / 2
-            cy = y0 + 112 + r_i * 50
             if dd.month != today.month:
                 continue
+            cx = m + cell * c_i + cell / 2
+            cy = y0 + 92 + r_i * 41
             if dd == today:
-                d.ellipse([cx - 23, cy - 23, cx + 23, cy + 23], fill=CZARNY)
-                d.text((cx, cy), str(dd.day), font=F(24, True), fill=BIALY, anchor="mm")
+                d.ellipse([cx - 20, cy - 20, cx + 20, cy + 20], fill=CZARNY)
+                d.text((cx, cy), str(dd.day), font=F(22, True), fill=BIALY, anchor="mm")
             else:
-                d.text((cx, cy), str(dd.day), font=F(24, dd.weekday() >= 5),
+                d.text((cx, cy), str(dd.day), font=F(22, dd.weekday() >= 5),
                        fill=CZARNY if dd >= today else JASNY, anchor="mm")
-            if dd in busy and dd != today:
-                d.ellipse([cx - 4, cy + 15, cx + 4, cy + 23], fill=CZARNY)
+                if dd in busy:
+                    d.ellipse([cx - 4, cy + 13, cx + 4, cy + 21], fill=CZARNY)
 
-    # ---- LISTA WYDARZEŃ ----
-    lx = gx + grid_w + 40
-    lw = W - M - lx
+    # ---- WYDARZENIA ----
+    lx = m + cell * 7 + 28
+    lw = VW - m - lx
     ly = y0
-    max_y = H - 70
-    d.text((lx, ly), "Najbliższe", font=F(32, True), fill=CZARNY)
-    ly += 55
+    max_y = VH - 72          # dół zostaje wolny na stan baterii
+    d.text((lx, ly), "Najbliższe", font=F(28, True), fill=CZARNY)
+    ly += 46
+    fe, fb = F(24), F(24, True)
     if not cal_configured:
-        d.text((lx, ly), fit(d, "Dodaj link iCal (ICAL_URLS)", F(26), lw), font=F(26), fill=SZARY)
+        d.text((lx, ly), fit(d, "Dodaj sekret ICAL_URLS", fe, lw), font=fe, fill=SZARY)
     elif not events:
-        d.text((lx, ly), "Brak wydarzeń w najbliższych dniach", font=F(26), fill=SZARY) \
-            if text_w(d, "Brak wydarzeń w najbliższych dniach", F(26)) < lw \
-            else d.text((lx, ly), "Brak wydarzeń", font=F(26), fill=SZARY)
-    current_day = None
-    hidden = 0
+        d.text((lx, ly), fit(d, "Brak wydarzeń", fe, lw), font=fe, fill=SZARY)
+    current_day, hidden = None, 0
     for ev in events:
-        need = (44 if ev["day"] != current_day else 0) + 40
+        need = (40 if ev["day"] != current_day else 0) + 36
         if ly + need > max_y:
             hidden += 1
             continue
         if ev["day"] != current_day:
             current_day = ev["day"]
-            if ly > y0 + 60:
-                ly += 8
-            lbl = day_label(current_day, today)
-            d.text((lx, ly), fit(d, lbl, F(26, True), lw), font=F(26, True),
+            if ly > y0 + 50:
+                ly += 6
+            d.text((lx, ly), fit(d, day_label(current_day, today), fb, lw), font=fb,
                    fill=CZARNY if current_day <= today + timedelta(days=1) else CIEMNY)
-            ly += 36
+            ly += 34
         if ev["allday"]:
-            tw = text_w(d, fit(d, ev["title"], F(26), lw - 24), F(26))
-            d.rounded_rectangle([lx, ly - 2, lx + tw + 20, ly + 34], radius=8, fill=CZARNY)
-            d.text((lx + 10, ly), fit(d, ev["title"], F(26), lw - 24), font=F(26), fill=BIALY)
+            t = fit(d, ev["title"], fe, lw - 20)
+            d.rounded_rectangle([lx, ly - 2, lx + text_w(d, t, fe) + 16, ly + 31], radius=7, fill=CZARNY)
+            d.text((lx + 8, ly), t, font=fe, fill=BIALY)
         else:
-            d.text((lx, ly), ev["time"], font=F(26, True), fill=CIEMNY)
-            d.text((lx + 88, ly), fit(d, ev["title"], F(26), lw - 88), font=F(26), fill=CZARNY)
-        ly += 40
+            d.text((lx, ly), ev["time"], font=fb, fill=CIEMNY)
+            d.text((lx + 80, ly), fit(d, ev["title"], fe, lw - 80), font=fe, fill=CZARNY)
+        ly += 36
     if hidden:
-        d.text((lx, max_y + 6), f"+ {hidden} więcej", font=F(22), fill=SZARY)
-
-    # ---- STOPKA ----
+        d.text((VW - m, max_y + 2), f"+ {hidden} więcej", font=F(20), fill=SZARY, anchor="ra")
     if cal_errors:
-        d.text((M, H - 40), f"Nie udało się pobrać {cal_errors} kalendarza(y)", font=F(20), fill=SZARY)
-    # środek dolnej krawędzi zostaje pusty – Kindle dopisuje tam stan baterii
+        d.text((m, max_y + 2), f"Błąd {cal_errors} kalendarza", font=F(20), fill=SZARY)
 
+    # ---- SKALOWANIE DO EKRANU ----
+    img = img.resize((W, H), Image.LANCZOS)
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     img.save(out, optimize=True)
-    print(f"Zapisano {out}")
+    print(f"Zapisano {out} ({W}x{H})")
 
 
 def main():
