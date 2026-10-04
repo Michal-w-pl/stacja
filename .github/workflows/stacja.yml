@@ -2,7 +2,7 @@ name: Stacja pogody
 
 on:
   schedule:
-    - cron: "*/30 * * * *"   # co 30 minut (GitHub potrafi spóźnić się o kilka-kilkanaście minut)
+    - cron: "7,22,37,52 * * * *"   # co 15 minut, poza godzinami szczytu
   workflow_dispatch:          # przycisk "Run workflow" do ręcznego uruchomienia
   push:
     branches: [main]
