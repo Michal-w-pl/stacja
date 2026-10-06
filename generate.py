@@ -289,6 +289,37 @@ def demo_events(now):
     ], 0, True
 
 
+# ------------------------- WYWÓZ ŚMIECI -------------------------
+import re
+SLOWA_SMIECI = ("wywóz", "wywoz", "śmieci", "smieci", "odpady", "odpadów", "odbiór odpadów")
+
+
+def is_waste(ev):
+    t = ev["title"].lower()
+    return any(w in t for w in SLOWA_SMIECI)
+
+
+def waste_name(title):
+    """'Wywóz śmieci – plastik' -> 'plastik'"""
+    t = re.sub(r"^\s*((wywóz|wywoz|odbiór|odbior|śmieci|smieci|odpady|odpadów|odpadow)[\s:–—-]*)+",
+               "", title, flags=re.IGNORECASE).strip()
+    return t or title
+
+
+def next_waste(events, today):
+    w = [e for e in events if is_waste(e) and e["day"] >= today]
+    if not w:
+        return None, []
+    day = min(e["day"] for e in w)
+    names = []
+    for e in w:
+        if e["day"] == day:
+            n = waste_name(e["title"])
+            if n.lower() not in [x.lower() for x in names]:
+                names.append(n)
+    return day, names
+
+
 # ------------------------- RYSOWANIE -------------------------
 def day_label(day, today):
     if day == today:
@@ -309,7 +340,8 @@ def render(weather, events, cal_errors, cal_configured, now, out):
     d.text((m, 26), DNI[today.weekday()], font=F(36), fill=CIEMNY)
     d.text((m, 66), f"{today.day} {MIESIACE[today.month - 1]}", font=F(66, True), fill=CZARNY)
     d.text((VW - m, 34), MIASTO, font=F(30, True), fill=CZARNY, anchor="ra")
-    d.text((VW - m, 74), f"akt. {now:%H:%M}", font=F(24), fill=SZARY, anchor="ra")
+    d.text((VW - m, 74), f"tydzień {today.isocalendar()[1]}", font=F(24), fill=CIEMNY, anchor="ra")
+    d.text((VW - m, 106), f"akt. {now:%H:%M}", font=F(22), fill=SZARY, anchor="ra")
     d.line([m, 158, VW - m, 158], fill=CZARNY, width=3)
 
     # ---- POGODA (kompaktowo) ----
@@ -345,21 +377,52 @@ def render(weather, events, cal_errors, cal_configured, now, out):
 
     d.line([m, 300, VW - m, 300], fill=CZARNY, width=3)
 
-    # ---- MINI MIESIĄC (lewa kolumna) ----
+    # ---- PASEK: NAJBLIŻSZY WYWÓZ ŚMIECI ----
     y0 = 318
-    cell = 48
+    w_day, w_names = next_waste(events, today)
+    if w_day:
+        pilne = w_day <= today + timedelta(days=1)
+        if w_day == today:
+            kiedy = "Dziś"
+        elif w_day == today + timedelta(days=1):
+            kiedy = "Jutro"
+        else:
+            kiedy = f"{DNI_KR[w_day.weekday()]} {w_day.day}.{w_day.month:02d}"
+        txt = f"♻ Wywóz {kiedy.lower() if kiedy in ('Dziś', 'Jutro') else kiedy}: {', '.join(w_names)}"
+        maxw = VW - 2 * m - 32
+        sz = next((z for z in (26, 23, 21) if text_w(d, txt, F(z, True)) <= maxw), 21)
+        fw = F(sz, True)
+        if pilne:
+            d.rounded_rectangle([m, y0, VW - m, y0 + 50], radius=12, fill=CZARNY)
+            d.text((m + 16, y0 + 25), fit(d, txt, fw, maxw), font=fw, fill=BIALY, anchor="lm")
+        else:
+            d.rounded_rectangle([m, y0, VW - m, y0 + 50], radius=12, outline=SZARY, width=2)
+            d.text((m + 16, y0 + 25), fit(d, txt, F(sz), maxw), font=F(sz), fill=CIEMNY, anchor="lm")
+        y0 += 68
+    # śmieci nie dublujemy na liście wydarzeń
+    events = [e for e in events if not is_waste(e)]
+
+    # ---- MINI MIESIĄC (lewa kolumna, z numerami tygodni) ----
+    cell = 46
+    wk_w = 34                      # kolumna z numerami tygodni
+    gx = m + wk_w
     d.text((m, y0), f"{MIESIACE_M[today.month - 1]}", font=F(28, True), fill=CZARNY)
+    d.text((m + wk_w / 2, y0 + 48), "tydz", font=F(14), fill=JASNY, anchor="ma")
     for i, nm in enumerate(DNI_MINI):
-        d.text((m + cell * i + cell / 2, y0 + 46), nm, font=F(19, True),
+        d.text((gx + cell * i + cell / 2, y0 + 46), nm, font=F(19, True),
                fill=SZARY if i < 5 else CZARNY, anchor="ma")
     busy = {e["day"] for e in events}
+    this_week = today.isocalendar()[1]
     weeks = pycal.Calendar(firstweekday=0).monthdatescalendar(today.year, today.month)
     for r_i, week in enumerate(weeks):
+        cy = y0 + 92 + r_i * 41
+        wn = week[0].isocalendar()[1]
+        cur = wn == this_week
+        d.text((m + wk_w / 2, cy), str(wn), font=F(17, cur), fill=CZARNY if cur else SZARY, anchor="mm")
         for c_i, dd in enumerate(week):
             if dd.month != today.month:
                 continue
-            cx = m + cell * c_i + cell / 2
-            cy = y0 + 92 + r_i * 41
+            cx = gx + cell * c_i + cell / 2
             if dd == today:
                 d.ellipse([cx - 20, cy - 20, cx + 20, cy + 20], fill=CZARNY)
                 d.text((cx, cy), str(dd.day), font=F(22, True), fill=BIALY, anchor="mm")
@@ -371,7 +434,7 @@ def render(weather, events, cal_errors, cal_configured, now, out):
     grid_bottom = y0 + 92 + len(weeks) * 41
 
     # ---- WYDARZENIA: obok miesiąca, a pod nim na całą szerokość ----
-    col_x = m + cell * 7 + 28
+    col_x = gx + cell * 7 + 24
     ly = y0
     max_y = VH - 72          # dół zostaje wolny na stan baterii
     fe, fb = F(25), F(25, True)
@@ -395,7 +458,7 @@ def render(weather, events, cal_errors, cal_configured, now, out):
             current_day = ev["day"]
             if ly > y0 + 50:
                 ly += 8
-            lx, lw = area(ly + 34)
+            lx, lw = area(ly + 36 + 34)          # nagłówek + pierwsze wydarzenie razem
             if lx == m and ly < grid_bottom:     # przeskok pod kalendarz
                 ly = grid_bottom + 8
             lx, lw = area(ly)
