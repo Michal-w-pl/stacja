@@ -283,6 +283,9 @@ def demo_events(now):
         {"day": t + timedelta(days=3), "time": "19:00", "title": "Kolacja u rodziców", "allday": False},
         {"day": t + timedelta(days=6), "time": "10:00", "title": "Przegląd samochodu", "allday": False},
         {"day": t + timedelta(days=6), "time": "18:00", "title": "Zebranie w szkole", "allday": False},
+        {"day": t + timedelta(days=3), "time": "", "title": "Wywóz: bio", "allday": True},
+        {"day": t + timedelta(days=6), "time": "", "title": "Wywóz: zmieszane", "allday": True},
+        {"day": t + timedelta(days=6), "time": "", "title": "Wywóz: segregowane", "allday": True},
         {"day": t + timedelta(days=9), "time": "", "title": "Wycieczka w góry", "allday": True},
         {"day": t + timedelta(days=11), "time": "12:00", "title": "Obiad u teściów", "allday": False},
         {"day": t + timedelta(days=14), "time": "08:00", "title": "Wywóz śmieci – szkło", "allday": False},
@@ -399,8 +402,20 @@ def render(weather, events, cal_errors, cal_configured, now, out):
             d.rounded_rectangle([m, y0, VW - m, y0 + 50], radius=12, outline=SZARY, width=2)
             d.text((m + 16, y0 + 25), fit(d, txt, F(sz), maxw), font=F(sz), fill=CIEMNY, anchor="lm")
         y0 += 68
-    # śmieci nie dublujemy na liście wydarzeń
-    events = [e for e in events if not is_waste(e)]
+    # wywozy z jednego dnia łączymy w jedną pozycję listy: "♻ zmieszane, bio"
+    merged, other = {}, []
+    for e in events:
+        if is_waste(e):
+            names = merged.setdefault(e["day"], [])
+            n = waste_name(e["title"])
+            if n.lower() not in [x.lower() for x in names]:
+                names.append(n)
+        else:
+            other.append(e)
+    waste_rows = [{"day": dd, "time": "", "title": "♻ " + ", ".join(nn), "allday": True,
+                   "waste": True} for dd, nn in merged.items()]
+    events = sorted(other + waste_rows,
+                    key=lambda x: (x["day"], not x.get("waste", False), not x["allday"], x["time"]))
 
     # ---- MINI MIESIĄC (lewa kolumna, z numerami tygodni) ----
     cell = 46
@@ -471,7 +486,12 @@ def render(weather, events, cal_errors, cal_configured, now, out):
         lx, lw = area(ly + 30)
         if lx == m and ly < grid_bottom:
             ly = grid_bottom + 8
-        if ev["allday"]:
+        if ev.get("waste"):
+            t = fit(d, ev["title"], fe, lw - 20)
+            d.rounded_rectangle([lx, ly - 2, lx + text_w(d, t, fe) + 16, ly + 32], radius=7,
+                                outline=SZARY, width=2)
+            d.text((lx + 8, ly), t, font=fe, fill=CIEMNY)
+        elif ev["allday"]:
             t = fit(d, ev["title"], fe, lw - 20)
             d.rounded_rectangle([lx, ly - 2, lx + text_w(d, t, fe) + 16, ly + 32], radius=7, fill=CZARNY)
             d.text((lx + 8, ly), t, font=fe, fill=BIALY)
