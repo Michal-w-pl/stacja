@@ -13,6 +13,7 @@ Zmienne środowiskowe:
 """
 
 import argparse
+import re
 import calendar as pycal
 import math
 import os
@@ -25,6 +26,7 @@ from PIL import Image, ImageDraw, ImageFont
 MIASTO = "Radomsko"
 LAT, LON = 51.0670, 19.4450
 STREFA = ZoneInfo("Europe/Warsaw")
+DNI_ZALEGLE = 14             # tyle dni wstecz szukamy niezrobionych zadań
 DNI_KALENDARZA = 21          # ile dni do przodu pokazywać wydarzenia
 W, H = 600, 800              # rozdzielczość ekranu Kindle 10. gen (J9G29R)
 M = 48                       # margines
@@ -228,6 +230,23 @@ def draw_icon(d, kind, cx, cy, size, night=False):
 
 
 # ------------------------- KALENDARZ -------------------------
+TASK_RE = re.compile(r"^\s*(zadanie|todo|☐|\[\s?\]|zrobione|gotowe|done|✓|✔|☑|\[x\])\s*[:\-–—]?\s*",
+                     re.IGNORECASE)
+DONE_RE = re.compile(r"^\s*(zrobione|gotowe|done|✓|✔|☑|\[x\])", re.IGNORECASE)
+
+
+def is_task(title):
+    return bool(TASK_RE.match(title))
+
+
+def is_done(title):
+    return bool(DONE_RE.match(title))
+
+
+def task_name(title):
+    return TASK_RE.sub("", title, count=1).strip() or title
+
+
 def fetch_events(now):
     import requests
     import icalendar
@@ -243,10 +262,18 @@ def fetch_events(now):
             r = requests.get(url, timeout=30)
             r.raise_for_status()
             cal = icalendar.Calendar.from_ical(r.content)
-            for ev in recurring_ical_events.of(cal).between(start, end):
+            for ev in recurring_ical_events.of(cal).between(start - timedelta(days=DNI_ZALEGLE), end):
                 s = ev.get("DTSTART").dt
                 e = ev.get("DTEND").dt if ev.get("DTEND") else None
                 title = str(ev.get("SUMMARY", "(bez tytułu)"))
+                s_day = s.astimezone(STREFA).date() if isinstance(s, datetime) and s.tzinfo else \
+                    (s.date() if isinstance(s, datetime) else s)
+                if s_day < start.date():
+                    # z przeszłości bierzemy tylko niezrobione (nieusunięte) zadania
+                    if is_task(title) and not is_done(title):
+                        events.append({"day": start.date(), "time": "", "title": title, "allday": True,
+                                       "overdue": s_day, "sort": start})
+                    continue
                 if isinstance(s, datetime):
                     s = s.astimezone(STREFA) if s.tzinfo else s.replace(tzinfo=STREFA)
                     events.append({"day": s.date(), "time": s.strftime("%H:%M"),
@@ -284,6 +311,11 @@ def demo_events(now):
         {"day": t + timedelta(days=6), "time": "10:00", "title": "Przegląd samochodu", "allday": False},
         {"day": t + timedelta(days=6), "time": "18:00", "title": "Zebranie w szkole", "allday": False},
         {"day": t + timedelta(days=3), "time": "", "title": "Wywóz: bio", "allday": True},
+        {"day": t, "time": "", "title": "Zadanie: zapłacić za prąd", "allday": True,
+         "overdue": t - timedelta(days=2)},
+        {"day": t, "time": "", "title": "Zadanie: odebrać paczkę", "allday": True},
+        {"day": t, "time": "", "title": "Zrobione: kupić prezent", "allday": True},
+        {"day": t + timedelta(days=1), "time": "", "title": "Zadanie: wynieść śmieci", "allday": True},
         {"day": t + timedelta(days=6), "time": "", "title": "Wywóz: zmieszane", "allday": True},
         {"day": t + timedelta(days=6), "time": "", "title": "Wywóz: segregowane", "allday": True},
         {"day": t + timedelta(days=9), "time": "", "title": "Wycieczka w góry", "allday": True},
@@ -298,6 +330,8 @@ SLOWA_SMIECI = ("wywóz", "wywoz", "śmieci", "smieci", "odpady", "odpadów", "o
 
 
 def is_waste(ev):
+    if is_task(ev["title"]):
+        return False
     t = ev["title"].lower()
     return any(w in t for w in SLOWA_SMIECI)
 
@@ -411,11 +445,14 @@ def render(weather, events, cal_errors, cal_configured, now, out):
             if n.lower() not in [x.lower() for x in names]:
                 names.append(n)
         else:
+            if is_task(e["title"]):
+                e = dict(e, task=True, done=is_done(e["title"]))
             other.append(e)
     waste_rows = [{"day": dd, "time": "", "title": "♻ " + ", ".join(nn), "allday": True,
                    "waste": True} for dd, nn in merged.items()]
     events = sorted(other + waste_rows,
-                    key=lambda x: (x["day"], not x.get("waste", False), not x["allday"], x["time"]))
+                    key=lambda x: (x["day"], not x.get("waste", False), not x.get("task", False),
+                                   x.get("done", False), not x["allday"], x["time"]))
 
     # ---- MINI MIESIĄC (lewa kolumna, z numerami tygodni) ----
     cell = 46
@@ -486,7 +523,29 @@ def render(weather, events, cal_errors, cal_configured, now, out):
         lx, lw = area(ly + 30)
         if lx == m and ly < grid_bottom:
             ly = grid_bottom + 8
-        if ev.get("waste"):
+        if ev.get("task"):
+            done = ev.get("done")
+            if done:
+                d.rounded_rectangle([lx + 2, ly + 3, lx + 26, ly + 27], radius=4, fill=SZARY)
+                d.line([lx + 7, ly + 15, lx + 12, ly + 21, lx + 22, ly + 9], fill=BIALY, width=3)
+            else:
+                d.rounded_rectangle([lx + 2, ly + 3, lx + 26, ly + 27], radius=4, outline=CZARNY, width=3)
+            tx = lx + 38
+            if ev["time"]:
+                d.text((tx, ly), ev["time"], font=fb, fill=CIEMNY)
+                tx += 84
+            dopisek = ""
+            if ev.get("overdue"):
+                od = ev["overdue"]
+                dopisek = "wczoraj" if od == today - timedelta(days=1) else f"od {od.day}.{od.month:02d}"
+            dw = text_w(d, dopisek, F(20)) + 10 if dopisek else 0
+            t = fit(d, task_name(ev["title"]), fe, lx + lw - tx - dw)
+            d.text((tx, ly), t, font=fe, fill=SZARY if done else CZARNY)
+            if done:
+                d.line([tx, ly + 17, tx + text_w(d, t, fe), ly + 17], fill=SZARY, width=2)
+            if dopisek:
+                d.text((tx + text_w(d, t, fe) + 10, ly + 5), dopisek, font=F(20), fill=SZARY)
+        elif ev.get("waste"):
             t = fit(d, ev["title"], fe, lw - 20)
             d.rounded_rectangle([lx, ly - 2, lx + text_w(d, t, fe) + 16, ly + 32], radius=7,
                                 outline=SZARY, width=2)
